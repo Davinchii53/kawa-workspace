@@ -189,12 +189,152 @@ The UI scaffold is complete and matches the V1 prototype visually. Booking inter
 
 ## 10. Next Steps (Upcoming Sessions)
 
-- [ ] Supabase project setup (create project, get URL + anon key)
-- [ ] `.env.local` configuration
-- [ ] `src/lib/supabase.ts` client setup
-- [ ] Database schema: `seats` table with `id`, `zone`, `type`, `status`, `booked_at`
-- [ ] Replace `INITIAL_SEATS` static data with Supabase fetch
-- [ ] Real-time subscription for live seat status updates via WebSocket
-- [ ] Booking write — insert booking record to Supabase on confirm
+- [x] Supabase project setup (create project, get URL + anon key)
+- [x] `.env.local` configuration
+- [x] `src/lib/supabase.ts` client setup
+- [x] Database schema: `seats` table with `id`, `zone`, `type`, `status`, `booked_at`
+- [x] Replace `INITIAL_SEATS` static data with Supabase fetch
+- [x] Real-time subscription for live seat status updates via WebSocket
+- [x] Booking write — insert booking record to Supabase on confirm
 - [ ] Auth (Supabase Auth) — user login, protected routes
+- [ ] Replace "Today" stats panel with real per-user booking data
+- [ ] Environment cards hooked to a real `environment` table in Supabase
+- [ ] Azure Static Web Apps deployment
+
+---
+
+## 11. Supabase Integration (Session 2)
+
+### Project Setup
+- Project name: `kawa-workspace`
+- Region: Southeast Asia (Singapore)
+- Supabase account: Davinchii53
+
+### Database Schema
+
+```sql
+CREATE TABLE seats (
+  id          TEXT PRIMARY KEY,
+  zone        TEXT NOT NULL,
+  type        TEXT NOT NULL CHECK (type IN ('desk', 'pod')),
+  status      TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'occupied', 'reserved')),
+  booked_at   TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Seeded with 15 seats across zones A, B, C (open desks) and P (private pods).
+
+### Supabase Client
+
+`src/lib/supabase.ts`
+
+```ts
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+```
+
+### What `page.tsx` now does
+- Fetches all seats from Supabase on mount via `fetchSeats()`
+- Shows `fetching seats...` loading state while waiting
+- Subscribes to `postgres_changes` on the `seats` table via WebSocket for live updates
+- `handleBook()` writes `status: "occupied"` and `booked_at` timestamp to Supabase on confirm
+- Occupancy card in env strip now calculates live from real seat data
+
+### Bugs & Issues Fixed This Session
+
+| Issue | Cause | Fix |
+|---|---|---|
+| "Invalid path specified in request URL" | `.env.local` had JS syntax (`'`, `;`) and `/rest/v1/` appended to URL | Removed all syntax, stripped URL to base `.supabase.co` only |
+| "Permission denied for table seats" | Project created with RLS auto-enabled and public exposure disabled | Ran `GRANT SELECT, UPDATE ON seats TO anon` and `ALTER TABLE seats DISABLE ROW LEVEL SECURITY` |
+| Missing `key` prop warning in hero stats | Fragment `<>` used inside `.map()` can't carry a `key` prop | Replaced fragment with a keyed `<div>` wrapper |
+| Supabase connection using wrong key format | Supabase now shows "Publishable" keys by default; new format not compatible with current JS client | Switched to legacy `anon` key from the Legacy tab in API settings |
+
+### Confirmed Working
+- Floor plan loads 15 seats from Supabase on every page load
+- Booking A3 flips it to `occupied` in the database and persists across refreshes
+- Realtime subscription active — status changes propagate across browser tabs without refresh
+
+---
+
+## 12. Auth & Admin Controls (Session 3 — June 15, 2026)
+
+### Admin Account Setup
+- Created admin user manually via Supabase Dashboard → Authentication → Users
+- Email confirmation fixed via SQL since account was created manually outside the email flow:
+
+```sql
+UPDATE auth.users
+SET email_confirmed_at = NOW()
+WHERE email = 'your-email-here@gmail.com';
+```
+
+- Admin role assigned via user metadata:
+
+```sql
+UPDATE auth.users
+SET raw_user_meta_data = jsonb_set(
+  COALESCE(raw_user_meta_data, '{}'),
+  '{role}',
+  '"admin"'
+)
+WHERE email = 'your-email-here@gmail.com';
+```
+
+- `booked_by` column added to seats table:
+
+```sql
+ALTER TABLE seats ADD COLUMN booked_by UUID REFERENCES auth.users(id);
+```
+
+### Files Added
+- `src/lib/auth.ts` — `signIn`, `signOut`, `getSession`, `getUser`, `isAdmin` helpers
+- `src/components/auth/LoginModal.tsx` — modal with email/password fields, Enter key support, error display
+
+### Auth Flow in `page.tsx`
+- `supabase.auth.getSession()` on mount to restore existing session
+- `supabase.auth.onAuthStateChange()` listener keeps `user` state in sync
+- `isAdmin(user)` check gates all booking controls
+- `handleBook()` now writes `booked_by: user.id` to Supabase
+- `handleUnbook()` resets `status` to `available`, clears `booked_at` and `booked_by`
+- `handleReserve()` sets `status` to `reserved` with `booked_at` and `booked_by`
+
+### Role Model
+| Role | Permissions |
+|---|---|
+| Visitor (no login) | Read-only floor plan view |
+| Admin (logged in) | Book, reserve, unbook any seat |
+
+### UI Changes
+- Nav bar shows "Admin login" button for visitors
+- Nav bar shows "admin" badge + "Sign out" button when logged in as admin
+- `BookingSidebar` shows "Seat control" title and action buttons for admin
+- `BookingSidebar` shows "Seat status" title and no buttons for visitors
+- Book + Reserve buttons shown when selected seat is available
+- Unbook button shown when selected seat is occupied or reserved
+
+### Bugs & Issues Fixed This Session
+
+| Issue | Cause | Fix |
+|---|---|---|
+| "Invalid login credentials" | User created manually without email confirmation | Ran `UPDATE auth.users SET email_confirmed_at = NOW()` |
+| Unbook button unreachable | `DeskNode` blocked all clicks on occupied/reserved seats unconditionally | Added `isAdmin` prop to `DeskNode`, only blocks clicks when `!isAdmin` |
+| `isAdmin` unused variable warning in `FloorPlan` | Prop passed but not used internally | Removed from destructure initially, added back when needed for `DeskNode` |
+
+### Confirmed Working
+- Admin login and logout via modal
+- "admin" badge appears in nav on successful login
+- Book a seat → writes `occupied` + `booked_at` + `booked_by` to Supabase
+- Reserve a seat → writes `reserved` + `booked_at` + `booked_by` to Supabase
+- Unbook a seat → resets to `available`, clears `booked_at` and `booked_by`
+- Visitors see floor plan live but cannot interact with seats
+- All changes persist in Supabase and reflect across browser tabs via realtime
+
+### Remaining Next Steps
+- [ ] "Today" stats panel with real per-user booking data
+- [ ] Environment cards hooked to a real Supabase `environment` table
 - [ ] Azure Static Web Apps deployment
