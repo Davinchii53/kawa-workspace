@@ -1,3 +1,86 @@
+# kawa.
+
+A real-time co-working space management dashboard built as a portfolio project.
+
+**Live:** [kawa-workspace.pages.dev](https://kawa-workspace.pages.dev)
+
+---
+
+## Concept
+
+Kawa (川, Japanese for "river") is a seat booking and floor management system for a developer-focused co-working space in Bandung. The name maps to the idea of flow state — the kind of deep focus that good working environments are built around.
+
+The dashboard shows a live floor plan where visitors can see which desks and private pods are available in real time. An admin account controls all seat operations — booking, reserving, and unbooking seats — while regular visitors get a read-only live view.
+
+---
+
+## Core Features
+
+- **Live floor plan** — desk and pod nodes update in real time across all connected browsers via Supabase WebSocket subscriptions
+- **Seat booking** — admin can book, reserve, or unbook any seat; changes persist in the database immediately
+- **Role-based access** — visitors see the floor plan live but cannot interact; only the authenticated admin can manage seats
+- **Environment strip** — displays zone conditions (temperature, noise, lighting, occupancy)
+- **Live clock** — current session time displayed in the nav
+
+---
+
+## Tech Stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 15 (App Router, Edge Runtime) |
+| Language | TypeScript |
+| Styling | Tailwind CSS + Shadcn/UI |
+| Database | Supabase (PostgreSQL) |
+| Realtime | Supabase WebSocket (postgres_changes) |
+| Auth | Supabase Auth |
+| Hosting | Cloudflare Pages |
+
+---
+
+## Project Structure
+
+```
+src/
+├── app/
+│   └── page.tsx              # Root page, state owner
+├── components/
+│   ├── auth/
+│   │   └── LoginModal.tsx    # Admin login modal
+│   ├── booking/
+│   │   └── BookingSidebar.tsx # Seat control panel
+│   └── floor/
+│       ├── FloorPlan.tsx     # Floor grid, zones, legend
+│       └── DeskNode.tsx      # Individual seat node
+├── lib/
+│   ├── supabase.ts           # Supabase client
+│   └── auth.ts               # Auth helpers
+└── types/
+    └── index.ts              # Shared TypeScript interfaces
+```
+
+---
+
+## Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Create .env.local and add your Supabase credentials
+NEXT_PUBLIC_SUPABASE_URL=your_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+
+# Run dev server
+npm run dev
+```
+
+---
+
+## Part of a larger project
+
+Kawa is one of two projects built under the same initiative. The second — **Davinchii** — is a gaming lounge booking system with a neon aesthetic inspired by Honkai: Star Rail. Coming soon.
+
 # Kawa Workspace — Dev Log
 **Date:** June 14, 2026  
 **Session:** Project kickoff + UI scaffold  
@@ -338,3 +421,29 @@ ALTER TABLE seats ADD COLUMN booked_by UUID REFERENCES auth.users(id);
 - [ ] "Today" stats panel with real per-user booking data
 - [ ] Environment cards hooked to a real Supabase `environment` table
 - [ ] Azure Static Web Apps deployment
+
+---
+
+## 13. Cloudflare Pages Deployment (Session 3 — June 15, 2026)
+
+### Build Configuration
+- **Framework preset:** Next.js
+- **Build command:** `npx @cloudflare/next-on-pages@1`
+- **Build output directory:** `.vercel/output/static`
+- **Branch:** main
+
+### Changes Made for Cloudflare Compatibility
+- `next.config.ts` stripped to empty config (removed experimental runtime flag)
+- `export const runtime = "edge"` added to `src/app/page.tsx`
+- `package-lock.json` regenerated via `npm install` to resolve missing `@emnapi` packages
+
+### Issues Fixed
+
+| Issue | Cause | Fix |
+|---|---|---|
+| `npm ci` sync error | `package-lock.json` out of sync with `package.json` | Ran `npm install` locally, committed updated lock file |
+| Node.js Compatibility Error on live URL | `nodejs_compat` flag not set | Added flag under Settings → Runtime → Compatibility flags in Cloudflare dashboard |
+| Cloudflare building old commit | Dashboard not auto-picking up new push | Triggered manual redeploy via empty commit (`git commit --allow-empty`) |
+
+
+Auto-deploys on every push to `main`.
